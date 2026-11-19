@@ -6,4 +6,5 @@ mlflow.db
 mlruns/
 mlartifacts/
 .venv/
+mlflow-data/
 # data/raw and data/processed are tracked by DVC (it adds its own .gitignore entries)
