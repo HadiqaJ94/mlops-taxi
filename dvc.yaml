@@ -1,0 +1,38 @@
+stages:
+  download:
+    cmd: uv run python -m src.data.download
+    deps:
+      - src/data/download.py
+    params:
+      - data.base_url
+      - data.reference_months
+      - data.drift_months
+    outs:
+      - data/raw
+
+  preprocess:
+    cmd: uv run python -m src.data.preprocess
+    deps:
+      - src/data/preprocess.py
+      - data/raw
+    params:
+      - data
+    outs:
+      - data/processed/demand.parquet
+      - data/processed/zones.json
+      - data/processed/quality_report.json
+
+  train:
+    cmd: uv run python -m src.train
+    deps:
+      - src/train.py
+      - src/features.py
+      - src/registry.py
+      - data/processed/demand.parquet
+    params:
+      - features
+      - train
+      - mlflow
+    metrics:
+      - metrics.json:
+          cache: false

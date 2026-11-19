@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+mlflow.db
+mlruns/
+mlartifacts/
+.venv/
+# data/raw and data/processed are tracked by DVC (it adds its own .gitignore entries)

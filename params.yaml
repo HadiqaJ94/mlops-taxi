@@ -1,0 +1,22 @@
+data:
+  base_url: https://d37ci6vzurychx.cloudfront.net/trip-data/
+  reference_months: ["2020-01", "2020-02"]   # what the model is trained on
+  drift_months: ["2020-03", "2020-04", "2020-05", "2020-06"]   # COVID collapse
+  min_zone_id: 1
+  max_zone_id: 263        # 264/265 are "unknown" zones
+  top_zones: 50           # busiest zones in the reference period
+
+features:
+  lags: [1, 2, 3, 24, 168]   # hours
+
+train:
+  val_days: 14               # last N days of the reference period = validation
+  loss: poisson              # counts >= 0
+  max_iter: 300
+  learning_rate: 0.1
+  max_depth: 8
+  random_state: 42
+
+mlflow:
+  experiment: nyc-taxi-demand
+  registered_model: taxi-demand-forecaster
