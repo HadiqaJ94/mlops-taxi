@@ -1,7 +1,7 @@
 [project]
 name = "mlops-taxi"
 version = "0.1.0"
-description = "Add your description here"
+description = "NYC taxi demand forecasting: a production ML system (MLflow, DVC, FastAPI, monitoring)"
 readme = "README.md"
 authors = [
     { name = "Hadiqa94", email = "hadilakk2443837@gmail.com" }
@@ -22,13 +22,6 @@ dependencies = [
     "uvicorn>=0.54.0",
 ]
 
-[project.scripts]
-mlops-taxi = "mlops_taxi:main"
-
-[build-system]
-requires = ["uv_build>=0.13.7,<0.14.0"]
-build-backend = "uv_build"
-
 [dependency-groups]
 dev = [
     "dvc>=3.67.1",
@@ -37,3 +30,8 @@ dev = [
     "pytest>=9.2.0",
     "ruff>=0.17.6",
 ]
+
+[tool.uv.extra-build-variables]
+# PyYAML has no Windows wheel for Python 3.15, so uv builds it from source. Its optional
+# C extension needs Microsoft C++ Build Tools; the pure-Python build needs nothing.
+pyyaml = { PYYAML_FORCE_LIBYAML = "0", PYYAML_FORCE_CYTHON = "0" }

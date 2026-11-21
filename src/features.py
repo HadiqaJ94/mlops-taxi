@@ -3,7 +3,7 @@
 Setup: a row at hour t has target = pickups in hour t, and lag_k = pickups in hour t-k.
 So predicting "the next hour" = predicting the row whose lags end at the last observed hour.
 """
-from typing import Sequence
+from collections.abc import Sequence
 
 import pandas as pd
 from pandas.tseries.holiday import USFederalHolidayCalendar

@@ -74,7 +74,7 @@ def git_info() -> dict:
         return subprocess.check_output(["git", *args], cwd=ROOT, stderr=subprocess.DEVNULL, text=True).strip()
     try:
         return {"git_commit": run("rev-parse", "HEAD"), "git_dirty": str(bool(run("status", "--porcelain")))}
-    except Exception:
+    except (OSError, subprocess.CalledProcessError):  # no git binary, or not a git checkout
         return {"git_commit": "unknown", "git_dirty": "unknown"}
 
 
@@ -132,7 +132,8 @@ def main() -> None:
     if registry.champion_version(client, mp["registered_model"]) is None:
         registry.promote(client, mp["registered_model"], version)
 
-    (ROOT / "metrics.json").write_text(json.dumps(metrics, indent=2))
+    # newline="\n": the same bytes on Windows and macOS, so DVC sees the same hash everywhere
+    (ROOT / "metrics.json").write_text(json.dumps(metrics, indent=2) + "\n", newline="\n")
     log.info("run=%s version=%s metrics=%s", run.info.run_id, version, json.dumps(metrics))
 
 
