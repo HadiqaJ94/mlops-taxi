@@ -21,7 +21,9 @@ mlflow:
   experiment: nyc-taxi-demand
   registered_model: taxi-demand-forecaster
 
-validate:                   # src/data/validate.py (T4)
-  max_outlier_share: 0.01   # real TLC files have ~0.006% absurd values; a broken column has far more
-  fare_range: [0, 200]      # mean_fare per zone and hour, USD
-  distance_range: [0, 100]  # mean_distance per zone and hour, miles
+drift:                      # src/drift.py (T11); not used by the DVC stages
+  bins: 10                  # reference deciles
+  psi_watch: 0.1            # session 5 rule of thumb: < 0.1 stable, 0.1-0.25 watch
+  psi_act: 0.25             # >= 0.25 act
+  wape_ratio_max: 1.5       # weekly WAPE above 1.5x the validation WAPE = performance drift
+  features: [lag_1, lag_24, lag_168, mean_fare, mean_distance]   # fare/distance: monitoring-only columns

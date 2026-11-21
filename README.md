@@ -55,24 +55,33 @@ Every prediction returns `model_version` and `model_ms` (time inside the model);
 Status codes: `422` bad input (the body names the field; also a zone the model does not serve),
 `503` no model, `401` wrong or missing admin token.
 
-## Data validation
-`dvc repro` runs `src/data/validate.py` between `preprocess` and `train`. If `demand.parquet` breaks a
-rule, the stage exits with code 1, the pipeline stops and no model is trained on bad data.
-The report is `data/processed/validation_report.json` (every failed rule, with examples).
+## Drift detection
+`src/drift.py` compares a window of data with the reference period the model was trained on
+(Jan-Feb 2020) and writes `reports/drift_report.json`. It exits with code 1 when it finds drift,
+so a scheduled job or the retraining step can react.
 
 ```bash
-uv run python -m src.data.validate
+uv run python -m src.drift                                     # last 7 days of the data
+uv run python -m src.drift --start 2020-03-09 --end 2020-03-23  # any window
+uv run python -m src.drift --no-model                          # input check only, no MLflow needed
 ```
 
-- Exact columns and types (an unexpected column, such as `cbd_congestion_fee` from 2025 files, fails).
-- `zone_id` is one of the 50 zones in `zones.json`; one row per zone and hour; every zone has every
-  hour of Jan-Jun 2020 (the lags use `shift()` on rows, so a gap would make them wrong).
-- `target >= 0`; `month` matches `pickup_hour`; `period` is `reference` exactly for Jan-Feb.
-- `mean_fare` and `mean_distance` are empty exactly when the hour had no trip.
-- At most 1% of fares outside $0-200 and of distances outside 0-100 miles. The TLC files have
-  about 0.006% absurd values (a $35,799 mean fare); a broken column (fares x100) fails.
+| Layer | Check | Drift when |
+|---|---|---|
+| Input | PSI per feature (`lag_1`, `lag_24`, `lag_168`, `mean_fare`, `mean_distance`) | PSI >= 0.25 |
+| Prediction | PSI and mean of the champion's predictions | PSI >= 0.25 |
+| Outcome | WAPE per week (weeks start on Monday) | above 1.5x the validation WAPE (0.107) |
 
-Rules and tolerances are in `params.yaml` under `validate`.
+Thresholds are in `params.yaml` under `drift` (0.1 = watch, 0.25 = act, course rule of thumb).
+The PSI helpers `bin_edges`, `proportions` and `psi_from_profile` are reused by the API's `/metrics` gauge.
+
+What it finds on the TLC data:
+
+| Window | Input PSI (`lag_1`) | Prediction PSI | Weekly WAPE | Drift |
+|---|---|---|---|---|
+| 2-9 March 2020 | 0.002 | 0.002 | 0.12 | no |
+| 9-23 March 2020 (lockdown) | 0.73 | 0.36 | 0.23, then 1.17 | yes |
+| 25 May-1 June 2020 | 6.1 | 5.6 | 0.66 | yes |
 
 ## Git workflow
 - Never commit to `master`. Create a branch per task: `git checkout -b feat/<task>`.
