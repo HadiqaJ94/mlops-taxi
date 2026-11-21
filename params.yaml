@@ -17,6 +17,13 @@ train:
   max_depth: 8
   random_state: 42
 
+gate:                        # src/gate.py (T6): candidate vs champion vs baseline on a FIXED window
+  # = the last train.val_days (14) days of the reference period, the window train.py has always
+  # validated on (tests/test_gate.py checks they stay equal). end is excluded.
+  val_start: "2020-02-16"
+  val_end: "2020-03-01"
+  min_improvement: 0.01      # candidate WAPE must be >= 1% (relative) below the champion's
+
 mlflow:
   experiment: nyc-taxi-demand
   registered_model: taxi-demand-forecaster

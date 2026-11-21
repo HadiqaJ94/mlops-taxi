@@ -46,6 +46,10 @@ stages:
       - features
       - train
       - mlflow
+      - gate.val_start          # train.py validates on the gate's fixed window
+      - gate.val_end
+    # The gate itself (src/gate.py) is NOT a stage: it reads and moves aliases in the MLflow
+    # registry, state DVC cannot hash. Run it after repro: uv run python -m src.gate
     metrics:
       - metrics.json:
           cache: false
