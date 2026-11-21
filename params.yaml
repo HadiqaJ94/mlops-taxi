@@ -24,6 +24,11 @@ gate:                        # src/gate.py (T6): candidate vs champion vs baseli
   val_end: "2020-03-01"
   min_improvement: 0.01      # candidate WAPE must be >= 1% (relative) below the champion's
 
+retrain:                     # src/retrain.py (T16): retrain on recent weeks when drift is found
+  as_of: null                # end of the recent windows, excluded (null = end of the data)
+  train_weeks: 8             # training window: the 8 weeks just before validation
+  val_weeks: 1               # validation (and drift check) window: the last week before as_of
+
 mlflow:
   experiment: nyc-taxi-demand
   registered_model: taxi-demand-forecaster
