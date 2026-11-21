@@ -71,6 +71,10 @@ stages:
       hash: md5
       md5: 2fe6b9a2685a5190d0aab19101e92638
       size: 2986479
+    - path: data/processed/validation_report.json
+      hash: md5
+      md5: b0c24ded6f21389c7fe90f5ae69c5b96
+      size: 179
     - path: src/features.py
       hash: md5
       md5: 70ca8eb3c1acada6279535153227c288
@@ -107,3 +111,46 @@ stages:
       hash: md5
       md5: 4e197774eb1570909402557964ca2c8c
       size: 232
+  validate:
+    cmd: uv run python -m src.data.validate
+    deps:
+    - path: data/processed/demand.parquet
+      hash: md5
+      md5: 2fe6b9a2685a5190d0aab19101e92638
+      size: 2986479
+    - path: data/processed/zones.json
+      hash: md5
+      md5: 4b6210a781f5ba55d7077534ff899a33
+      size: 238
+    - path: src/data/validate.py
+      hash: md5
+      md5: 5d6a95b7596eefa0c1d488cfb3770492
+      size: 6777
+    params:
+      params.yaml:
+        data:
+          base_url: https://d37ci6vzurychx.cloudfront.net/trip-data/
+          reference_months:
+          - 2020-01
+          - 2020-02
+          drift_months:
+          - 2020-03
+          - 2020-04
+          - 2020-05
+          - 2020-06
+          min_zone_id: 1
+          max_zone_id: 263
+          top_zones: 50
+        validate:
+          max_outlier_share: 0.01
+          fare_range:
+          - 0
+          - 200
+          distance_range:
+          - 0
+          - 100
+    outs:
+    - path: data/processed/validation_report.json
+      hash: md5
+      md5: b0c24ded6f21389c7fe90f5ae69c5b96
+      size: 179
