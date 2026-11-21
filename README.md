@@ -55,6 +55,34 @@ Every prediction returns `model_version` and `model_ms` (time inside the model);
 Status codes: `422` bad input (the body names the field; also a zone the model does not serve),
 `503` no model, `401` wrong or missing admin token.
 
+## Drift detection
+`src/drift.py` compares a window of data with the reference period the model was trained on
+(Jan-Feb 2020) and writes `reports/drift_report.json`. It exits with code 1 when it finds drift,
+so a scheduled job or the retraining step can react.
+
+```bash
+uv run python -m src.drift                                     # last 7 days of the data
+uv run python -m src.drift --start 2020-03-09 --end 2020-03-23  # any window
+uv run python -m src.drift --no-model                          # input check only, no MLflow needed
+```
+
+| Layer | Check | Drift when |
+|---|---|---|
+| Input | PSI per feature (`lag_1`, `lag_24`, `lag_168`, `mean_fare`, `mean_distance`) | PSI >= 0.25 |
+| Prediction | PSI and mean of the champion's predictions | PSI >= 0.25 |
+| Outcome | WAPE per week (weeks start on Monday) | above 1.5x the validation WAPE (0.107) |
+
+Thresholds are in `params.yaml` under `drift` (0.1 = watch, 0.25 = act, course rule of thumb).
+The PSI helpers `bin_edges`, `proportions` and `psi_from_profile` are reused by the API's `/metrics` gauge.
+
+What it finds on the TLC data:
+
+| Window | Input PSI (`lag_1`) | Prediction PSI | Weekly WAPE | Drift |
+|---|---|---|---|---|
+| 2-9 March 2020 | 0.002 | 0.002 | 0.12 | no |
+| 9-23 March 2020 (lockdown) | 0.73 | 0.36 | 0.23, then 1.17 | yes |
+| 25 May-1 June 2020 | 6.1 | 5.6 | 0.66 | yes |
+
 ## Git workflow
 - Never commit to `master`. Create a branch per task: `git checkout -b feat/<task>`.
 - Push, open a pull request, get one review, merge. Commit `uv.lock` and `dvc.lock` when they change.
