@@ -183,6 +183,35 @@ What it does on the TLC data:
 retraining on recent weeks it keeps reporting input drift; the gate, not the drift flag, is what
 protects the champion.
 
+## CI workflows
+| Workflow | Trigger | What it runs |
+|---|---|---|
+| `ci.yml` | every pull request and push to `master` | `ruff check`, `pytest` |
+| `train.yml` | manual (input: `min_improvement`) | `dvc repro validate` -> forced `train` stage -> `src.gate` |
+| `retrain.yml` | every Monday 06:00 UTC + manual (inputs: `force`, `as_of`) | same setup, reference model gated to champion, then `src.retrain` (drift check -> retrain -> gate) |
+
+Run one: GitHub -> **Actions** -> pick `train` or `retrain` -> **Run workflow** -> fill the inputs.
+The reports are attached to the run as **artifacts** (bottom of the run page): `train-reports`
+(`metrics.json`, `gate_report.json`, data quality and validation reports) and `retrain-reports`
+(`drift_report.json`, `retrain_report.json`, `gate_report.json`). They are uploaded even when a
+step fails. A scheduled workflow only runs from the default branch.
+
+How they cope with what a runner does not have:
+- **No team MLflow server**: `MLFLOW_TRACKING_URI=sqlite:///mlflow.db`, a registry inside the
+  runner, deleted with it. Same code path as local runs (it is `src/registry.py`'s default), and no
+  service container, port or `--allowed-hosts` to manage.
+- **No DVC remote** (it is a folder on one laptop): `dvc repro` rebuilds the data from the TLC files
+  (~300 MB). `actions/cache` keeps `data/raw` between runs, keyed on the download params and
+  `src/data/download.py`. Training is forced (`--force --single-item train`), because rebuilt data
+  matches `dvc.lock` and DVC would otherwise skip it.
+- Drift is not a failure: `src.retrain` runs `src.drift` itself and turns its exit code 1 into a
+  decision (retrain or not); the job fails only on a real error.
+
+**Trade-off:** the CI registry starts empty and disappears after the job, so these workflows do not
+promote anything the API serves. They prove that the pipeline (data -> train -> gate -> drift ->
+retrain -> gate) is reproducible from a clean machine and leave the evidence as artifacts. Real
+promotions are made against the team's MLflow server, with the same commands run locally.
+
 ## Incident simulation
 `src/simulate_incident.py` replays real taxi traffic against the running API: first a normal week,
 then the lockdown week. Each request is a real (zone, hour) from `demand.parquet`; its true pickup
