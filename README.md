@@ -83,6 +83,33 @@ What it finds on the TLC data:
 | 9-23 March 2020 (lockdown) | 0.73 | 0.36 | 0.23, then 1.17 | yes |
 | 25 May-1 June 2020 | 6.1 | 5.6 | 0.66 | yes |
 
+## Incident simulation
+`src/simulate_incident.py` replays real taxi traffic against the running API: first a normal week,
+then the lockdown week. Each request is a real (zone, hour) from `demand.parquet`; its true pickup
+count is kept aside as a label that "arrives later", and never sent to the API.
+
+```bash
+uv run uvicorn api.app:app --port 8000                       # in another terminal
+uv run python -m src.simulate_incident                       # 120 s normal (2-9 March), 180 s drift (16-23 March)
+uv run python -m src.simulate_incident --seconds 30 --rate 10                   # quick try
+uv run python -m src.simulate_incident --phase drift 2020-04-06 2020-04-13      # custom phase(s)
+```
+
+- Requests are shuffled within each phase (seed 42), so any slice of traffic is a fair sample of
+  the week; `--in-order` replays hour by hour instead.
+- Output: `reports/incident_timeline.csv` (one line per request: time, phase, `request_id`, status,
+  `model_version`, predicted, actual) and `reports/incident_summary.json` (per phase). Both are
+  generated, not committed.
+- Connection errors are logged and the run continues, so it can keep going through a reload,
+  a rollback or a restart of the API.
+
+A 20-second run per phase, at 20 requests per second, with model v1:
+
+| Phase | Mean predicted | Mean actual | WAPE |
+|---|---|---|---|
+| normal (2-9 March) | 176 | 169 | 0.13 |
+| drift (16-23 March) | 57 | 27 | 1.15 |
+
 ## Git workflow
 - Never commit to `master`. Create a branch per task: `git checkout -b feat/<task>`.
 - Push, open a pull request, get one review, merge. Commit `uv.lock` and `dvc.lock` when they change.
