@@ -21,8 +21,11 @@ docker compose up -d mlflow     # MLflow server + UI on http://localhost:5000
 uv run dvc repro                # download -> preprocess -> train (logs to MLflow)
 uv run pytest
 ```
+Edit `.env` and set your own `ADMIN_TOKEN` (it protects `/admin/reload`).
+
 The DVC remote is the folder `dvc-storage` next to the repo folder (`../dvc-storage`).
-`uv run dvc push` saves the data there; `uv run dvc pull` gets it back.
+`uv run dvc push` saves the data there; `uv run dvc pull` gets it back. That folder only exists
+on the PC that pushed: on a fresh clone, `uv run dvc repro` rebuilds the data from the TLC files.
 
 ## Daily commands
 | Task | Command |
@@ -32,7 +35,25 @@ The DVC remote is the folder `dvc-storage` next to the repo folder (`../dvc-stor
 | Tests and lint | `uv run pytest` and `uv run ruff check .` |
 | Model versions and aliases | `uv run python -m src.registry status` |
 | Promote / roll back | `uv run python -m src.registry promote --version N` / `uv run python -m src.registry rollback` |
+| Run the API | `uv run uvicorn api.app:app --port 8000` (one worker). Docs: http://localhost:8000/docs |
+| Serve the new champion | after promote or rollback: `curl -X POST localhost:8000/admin/reload -H "X-Admin-Token: <ADMIN_TOKEN from .env>"` |
 | Stop the stack | `docker compose down` |
+
+## API
+The API serves `models:/taxi-demand-forecaster@champion`, loaded once at startup.
+`MODEL_NAME` and `MODEL_ALIAS` (environment variables) override the model and alias.
+
+| Route | What it does |
+|---|---|
+| `POST /predict` | `{"zone_id": 237, "target_hour": "2020-02-20T18:00:00", "recent_counts": [...]}` returns the predicted pickups for that hour. `recent_counts`: at least 168 hourly counts for the zone, oldest first, the last one being the hour before `target_hour`. |
+| `POST /predict_batch` | `{"items": [<request>, ...]}`, up to 1000 items, one model call |
+| `GET /health` | `200 ok` with `model_version`, or `503 degraded` when no model is loaded |
+| `POST /admin/reload` | re-reads `@champion` without a restart; needs header `X-Admin-Token` |
+
+Every prediction returns `model_version` and `model_ms` (time inside the model); every response has
+`X-Request-ID` and `X-Process-Time-Ms` headers.
+Status codes: `422` bad input (the body names the field; also a zone the model does not serve),
+`503` no model, `401` wrong or missing admin token.
 
 ## Git workflow
 - Never commit to `master`. Create a branch per task: `git checkout -b feat/<task>`.
@@ -45,4 +66,6 @@ The DVC remote is the folder `dvc-storage` next to the repo folder (`../dvc-stor
 - `src/features.py` is shared by training and the API (no train/serve skew).
 - Registry aliases: the API serves `models:/taxi-demand-forecaster@champion`; new versions start as `candidate`.
 - Every MLflow run logs params, metrics, git commit, and the SHA-256 of the training data.
+- `.gitattributes` forces LF line endings and the pipeline writes its JSON files with LF, so DVC
+  hashes (and `dvc.lock`) are identical on Windows, macOS and Linux.
 - Metrics: MAE, RMSE, WAPE, compared with a "same hour last week" baseline.

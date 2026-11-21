@@ -34,8 +34,8 @@ stages:
       nfiles: 6
     - path: src/data/preprocess.py
       hash: md5
-      md5: d27e7260e55cccf71991202cbc58272a
-      size: 4835
+      md5: 447137d2c60db4ef678f6fd6ee449ac5
+      size: 4907
     params:
       params.yaml:
         data:
@@ -58,8 +58,8 @@ stages:
       size: 2986479
     - path: data/processed/quality_report.json
       hash: md5
-      md5: 80e9a040416fba0988ae4422c02ac7e6
-      size: 1241
+      md5: c40bc2b6b646a569e19cbc55703be010
+      size: 1194
     - path: data/processed/zones.json
       hash: md5
       md5: 4b6210a781f5ba55d7077534ff899a33
@@ -73,16 +73,16 @@ stages:
       size: 2986479
     - path: src/features.py
       hash: md5
-      md5: fc35a3d2d40c9603bb1ae2345ebaf3ba
-      size: 2744
+      md5: 70ca8eb3c1acada6279535153227c288
+      size: 2753
     - path: src/registry.py
       hash: md5
       md5: 85dc228f54645f8d36f27348ea02f66f
       size: 2882
     - path: src/train.py
       hash: md5
-      md5: 90882fe548f44e8a7a8ac591ef4a7f3d
-      size: 5437
+      md5: 4ba17b6cfa296e8b848fef5e74d2ed05
+      size: 5623
     params:
       params.yaml:
         features:
@@ -105,5 +105,5 @@ stages:
     outs:
     - path: metrics.json
       hash: md5
-      md5: b03007383c8ebf8aa38f7975fbf802c0
-      size: 238
+      md5: 4e197774eb1570909402557964ca2c8c
+      size: 232

@@ -23,7 +23,7 @@ def clean_trips(df: pd.DataFrame, month: str, min_zone: int, max_zone: int):
     """Clean one raw month. Returns (clean_df, stats) where stats counts dropped rows."""
     start, end = month_bounds(month)
     df = df.copy()
-    stats = {"rows_raw": int(len(df))}
+    stats = {"rows_raw": len(df)}
 
     df["tpep_pickup_datetime"] = pd.to_datetime(df["tpep_pickup_datetime"], errors="coerce")
     df["PULocationID"] = pd.to_numeric(df["PULocationID"], errors="coerce")
@@ -31,15 +31,15 @@ def clean_trips(df: pd.DataFrame, month: str, min_zone: int, max_zone: int):
     df["trip_distance"] = pd.to_numeric(df["trip_distance"], errors="coerce")
 
     df = df.dropna(subset=["tpep_pickup_datetime", "PULocationID"])
-    stats["rows_after_dropna"] = int(len(df))
+    stats["rows_after_dropna"] = len(df)
 
     # TLC files contain stray timestamps (2008, 2009, previous/next month...)
     ts = df["tpep_pickup_datetime"]
     df = df[(ts >= start) & (ts < end)]
-    stats["rows_in_month"] = int(len(df))
+    stats["rows_in_month"] = len(df)
 
     df = df[df["PULocationID"].between(min_zone, max_zone)]
-    stats["rows_valid_zone"] = int(len(df))
+    stats["rows_valid_zone"] = len(df)
 
     df["zone_id"] = df["PULocationID"].astype("int64")
     return df, stats
@@ -107,9 +107,10 @@ def main() -> None:
 
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     full.to_parquet(DEMAND_PATH, index=False)
-    (PROCESSED_DIR / "zones.json").write_text(json.dumps(zones))
-    report["n_zones"], report["n_rows"] = len(zones), int(len(full))
-    (PROCESSED_DIR / "quality_report.json").write_text(json.dumps(report, indent=2))
+    # newline="\n": same bytes (and DVC hashes) on Windows and macOS
+    (PROCESSED_DIR / "zones.json").write_text(json.dumps(zones), newline="\n")
+    report["n_zones"], report["n_rows"] = len(zones), len(full)
+    (PROCESSED_DIR / "quality_report.json").write_text(json.dumps(report, indent=2), newline="\n")
     log.info("Saved %s (%d rows, %d zones)", DEMAND_PATH, len(full), len(zones))
 
 
