@@ -37,6 +37,7 @@ on the PC that pushed: on a fresh clone, `uv run dvc repro` rebuilds the data fr
 | Promote / roll back | `uv run python -m src.registry promote --version N` / `uv run python -m src.registry rollback` |
 | Run the API | `uv run uvicorn api.app:app --port 8000` (one worker). Docs: http://localhost:8000/docs |
 | Serve the new champion | after promote or rollback: `curl -X POST localhost:8000/admin/reload -H "X-Admin-Token: <ADMIN_TOKEN from .env>"` |
+| Build and run the API image | see "Run the API in Docker" below |
 | Stop the stack | `docker compose down` |
 
 ## API
@@ -54,6 +55,21 @@ Every prediction returns `model_version` and `model_ms` (time inside the model);
 `X-Request-ID` and `X-Process-Time-Ms` headers.
 Status codes: `422` bad input (the body names the field; also a zone the model does not serve),
 `503` no model, `401` wrong or missing admin token.
+
+## Run the API in Docker
+The image installs only the runtime dependencies from `uv.lock` (`uv sync --locked --no-dev`),
+dependencies before code so the layer is cached, and runs one uvicorn worker. No secret is in the
+image: `MLFLOW_TRACKING_URI` and `ADMIN_TOKEN` are passed at run time.
+
+```bash
+docker compose up -d mlflow                      # the API needs the registry
+docker build -t mlops-taxi-api:dev .
+docker run --rm -p 8000:8000 -e MLFLOW_TRACKING_URI=http://host.docker.internal:5000 -e ADMIN_TOKEN=<token> mlops-taxi-api:dev
+curl http://localhost:8000/health                # {"status":"ok","model_version":"1"}
+```
+Open http://localhost:8000/docs (not `0.0.0.0`). The MLflow server accepts requests from
+`localhost`, `host.docker.internal` and `mlflow` only (`--allowed-hosts` in `docker-compose.yml`);
+any other host gets `403 Invalid Host header`.
 
 ## Drift detection
 `src/drift.py` compares a window of data with the reference period the model was trained on
