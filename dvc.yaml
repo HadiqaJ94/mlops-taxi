@@ -22,9 +22,22 @@ stages:
       - data/processed/zones.json
       - data/processed/quality_report.json
 
+  validate:                # T4: stops the pipeline (exit 1) if demand.parquet breaks a rule
+    cmd: uv run python -m src.data.validate
+    deps:
+      - src/data/validate.py
+      - data/processed/demand.parquet
+      - data/processed/zones.json
+    params:
+      - data
+      - validate
+    outs:
+      - data/processed/validation_report.json
+
   train:
     cmd: uv run python -m src.train
     deps:
+      - data/processed/validation_report.json   # train only runs after validate passed
       - src/train.py
       - src/features.py
       - src/registry.py

@@ -20,3 +20,8 @@ train:
 mlflow:
   experiment: nyc-taxi-demand
   registered_model: taxi-demand-forecaster
+
+validate:                   # src/data/validate.py (T4)
+  max_outlier_share: 0.01   # real TLC files have ~0.006% absurd values; a broken column has far more
+  fare_range: [0, 200]      # mean_fare per zone and hour, USD
+  distance_range: [0, 100]  # mean_distance per zone and hour, miles

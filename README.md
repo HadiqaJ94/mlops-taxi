@@ -55,6 +55,25 @@ Every prediction returns `model_version` and `model_ms` (time inside the model);
 Status codes: `422` bad input (the body names the field; also a zone the model does not serve),
 `503` no model, `401` wrong or missing admin token.
 
+## Data validation
+`dvc repro` runs `src/data/validate.py` between `preprocess` and `train`. If `demand.parquet` breaks a
+rule, the stage exits with code 1, the pipeline stops and no model is trained on bad data.
+The report is `data/processed/validation_report.json` (every failed rule, with examples).
+
+```bash
+uv run python -m src.data.validate
+```
+
+- Exact columns and types (an unexpected column, such as `cbd_congestion_fee` from 2025 files, fails).
+- `zone_id` is one of the 50 zones in `zones.json`; one row per zone and hour; every zone has every
+  hour of Jan-Jun 2020 (the lags use `shift()` on rows, so a gap would make them wrong).
+- `target >= 0`; `month` matches `pickup_hour`; `period` is `reference` exactly for Jan-Feb.
+- `mean_fare` and `mean_distance` are empty exactly when the hour had no trip.
+- At most 1% of fares outside $0-200 and of distances outside 0-100 miles. The TLC files have
+  about 0.006% absurd values (a $35,799 mean fare); a broken column (fares x100) fails.
+
+Rules and tolerances are in `params.yaml` under `validate`.
+
 ## Git workflow
 - Never commit to `master`. Create a branch per task: `git checkout -b feat/<task>`.
 - Push, open a pull request, get one review, merge. Commit `uv.lock` and `dvc.lock` when they change.
