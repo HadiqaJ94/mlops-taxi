@@ -7,6 +7,25 @@ Data: NYC Taxi & Limousine Commission (TLC) Trip Record Data,
 https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page. Raw files are not committed:
 `src/data/download.py` plus DVC rebuild them.
 
+## Project status (22 November)
+
+| Task | What | Owner | State |
+|---|---|---|---|
+| T0-T3 | uv, Git, DVC pipeline, MLflow server | Hadiqa, Soumaya | done |
+| T4 | Data validation (pandera, `validate` stage) | Soumaya | done, PR #8, #10 |
+| T5, T8 | FastAPI service and API tests | Manel, Soumaya | done, PR #4, #5 (3 extra tests still to add) |
+| T6 | Training gate (`src/gate.py`) | Alzira | done, PR #15 |
+| T7 | CI: lint and tests on pull requests | Hadiqa | done, PR #14 |
+| T9 | Dockerfile for the API | Hadiqa | done, PR #12, #13 |
+| T11 | Drift detection (`src/drift.py`) | Soumaya | done, PR #7 |
+| T16, T17 | Drift-triggered retraining, train/retrain workflows | Alzira | done, PR #18 |
+| T18 | Rollback runbook (`docs/runbook.md`) | Manel | done, PR #11 (no canary) |
+| T19 | Incident: simulator done (PR #9); run and report pending | Soumaya | in progress, waits on T13 |
+| T10, T12, T13 | `/metrics`, Prometheus/Grafana stack, alerts | Danila | to do |
+| T14 | Load test (Locust) | Manel | to do |
+| T15 | CI: build and push the Docker image | Hadiqa | to do |
+| T20, T21 | Fresh-clone test, presentation | all | to do |
+
 ## Prerequisites
 - Git, Docker Desktop (running), and uv: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
   (macOS/Linux: `curl -LsSf https://astral.sh/uv/install.sh | sh`). uv installs the right Python (3.15) itself.
