@@ -59,7 +59,9 @@ def load_champion() -> dict:
     encoder = model.named_steps["prep"].named_transformers_["zone"]
     zones = frozenset(int(z) for z in encoder.categories_[0])
     log.info("loaded %s v%s (%d zones)", MODEL_NAME, version, len(zones))
-    return {"model": model, "version": version, "zones": zones}
+    # training window (MLflow tags): the PSI reference follows the model after a retrain
+    window = monitoring.train_window(client, MODEL_NAME, version)
+    return {"model": model, "version": version, "zones": zones, "train_window": window}
 
 
 @asynccontextmanager
@@ -68,7 +70,8 @@ async def lifespan(app: FastAPI):
     monitoring.monitor.load_reference()  # PSI reference profiles, computed once
     try:
         state["current"] = load_champion()
-        monitoring.monitor.on_model_loaded(state["current"]["model"], state["current"]["version"])
+        current = state["current"]
+        monitoring.monitor.on_model_loaded(current["model"], current["version"], current.get("train_window"))
     except Exception:  # start degraded rather than not at all: /health says why
         log.exception("no model loaded, the service starts degraded")
     yield
@@ -218,5 +221,5 @@ def reload_model(x_admin_token: str | None = Header(default=None)):
         log.exception("reload failed, keeping v%s", previous)
         raise HTTPException(status_code=503, detail=f"reload failed, still serving v{previous}: {exc}")
     state["current"] = new
-    monitoring.monitor.on_model_loaded(new["model"], new["version"])
+    monitoring.monitor.on_model_loaded(new["model"], new["version"], new.get("train_window"))
     return {"previous_version": previous, "model_version": new["version"]}

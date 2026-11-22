@@ -1,6 +1,7 @@
 """Monitoring tests (T10). No MLflow, no Docker: the stub model of test_api.py is reused."""
 import json
 import logging
+import math
 
 import numpy as np
 import pandas as pd
@@ -65,13 +66,14 @@ def test_psi_gauge_stays_low_on_normal_traffic_and_jumps_on_drift():
 
 def test_no_psi_before_the_window_is_full():
     m, rng = make_monitor()
-    before = sample("taxi_input_psi", {"feature": "lag_1"})
     feed(m, rng.uniform(0, 100, 150))  # half a window
-    assert sample("taxi_input_psi", {"feature": "lag_1"}) == before
+    assert math.isnan(sample("taxi_input_psi", {"feature": "lag_1"}))
 
 
 def test_model_swap_resets_the_prediction_window():
-    m, rng = make_monitor()
+    table, rng = table_with_a_regime_change()
+    m = monitoring.Monitor(window=300, every=20)
+    m.set_features(table, ["lag_1"], ["lag_1"], bins=10)
 
     class Const:
         def predict(self, X):
@@ -113,3 +115,73 @@ def test_drift_through_the_api_moves_the_gauge(client, monkeypatch):  # noqa: F8
     assert sample("taxi_input_psi", {"feature": "lag_1"}) < 0.1
     batch(3)
     assert sample("taxi_input_psi", {"feature": "lag_1"}) > 0.25
+
+
+def test_gauges_are_nan_not_zero_when_there_is_no_data():
+    """A fake 0 made PredictionMeanShift go pending at startup (|0 - ref| / ref = 1)."""
+    make_monitor()
+    for name in ("taxi_prediction_mean", "taxi_prediction_psi"):
+        assert math.isnan(sample(name))
+    assert math.isnan(sample("taxi_input_psi", {"feature": "lag_1"}))
+
+
+class Const:
+    def predict(self, X):
+        return np.full(len(X), 50.0)
+
+
+def table_with_a_regime_change():
+    """Jan-Feb (reference period): lag_1 ~ U(0, 100). April: demand collapsed, lag_1 ~ U(0, 20)."""
+    rng = np.random.default_rng(1)
+    jan = pd.DataFrame({"lag_1": rng.uniform(0, 100, 1400), "period": "reference",   # Jan 1 to Feb 28
+                        "pickup_hour": pd.date_range("2020-01-01", periods=1400, freq="h")})
+    apr = pd.DataFrame({"lag_1": rng.uniform(0, 20, 2000), "period": "drift",
+                        "pickup_hour": pd.date_range("2020-04-01", periods=2000, freq="h")})
+    return pd.concat([jan, apr], ignore_index=True), rng
+
+
+def test_reference_follows_the_retrained_model():
+    """After a retrain on April, April traffic is normal again: the alert must be able to clear."""
+    table, rng = table_with_a_regime_change()
+    m = monitoring.Monitor(window=300, every=20)
+    m.set_features(table, ["lag_1"], ["lag_1"], bins=10)
+
+    m.on_model_loaded(Const(), "1")                       # first model: reference period
+    feed(m, rng.uniform(0, 20, 300))                      # April-like traffic
+    assert sample("taxi_input_psi", {"feature": "lag_1"}) > 0.25
+
+    window = (pd.Timestamp("2020-04-01"), pd.Timestamp("2020-04-30"))
+    m.on_model_loaded(Const(), "2", window)               # retrained on April
+    assert math.isnan(sample("taxi_input_psi", {"feature": "lag_1"}))   # old alert cleared at once
+    feed(m, rng.uniform(0, 20, 300))
+    assert sample("taxi_input_psi", {"feature": "lag_1"}) < 0.1
+
+
+def test_unknown_training_window_falls_back_to_the_reference_period():
+    table, _ = table_with_a_regime_change()
+    m = monitoring.Monitor(window=300, every=20)
+    m.set_features(table, ["lag_1"], ["lag_1"], bins=10)
+    m.on_model_loaded(Const(), "3", (pd.Timestamp("2030-01-01"), pd.Timestamp("2030-02-01")))
+    assert len(m.reference) == 1400 and m.reference["lag_1"].max() > 90   # the Jan-Feb rows
+
+
+class FakeClient:
+    def __init__(self, tags=None, fail=False):
+        self.tags, self.fail = tags or {}, fail
+
+    def get_model_version(self, name, version):
+        if self.fail:
+            raise RuntimeError("mlflow down")
+        return type("MV", (), {"run_id": "r1"})
+
+    def get_run(self, run_id):
+        return type("Run", (), {"data": type("D", (), {"tags": self.tags})})
+
+
+def test_train_window_reads_the_run_tag():
+    """The tag train.py already logs: f"{train_start}..{val_start}"."""
+    tags = {"train_window": "2020-04-01 00:00:00..2020-04-29 00:00:00"}
+    assert monitoring.train_window(FakeClient(tags), "m", "2") == (
+        pd.Timestamp("2020-04-01"), pd.Timestamp("2020-04-29"))
+    assert monitoring.train_window(FakeClient({}), "m", "1") is None       # a run without the tag
+    assert monitoring.train_window(FakeClient(fail=True), "m", "1") is None  # MLflow down: no crash
