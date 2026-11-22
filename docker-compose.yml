@@ -1,3 +1,7 @@
+# Full stack: MLflow + API + monitoring.   docker compose up -d --build
+#   MLflow http://localhost:5000   API http://localhost:8000/docs   Prometheus http://localhost:9090
+#   Alertmanager http://localhost:9093   Grafana http://localhost:3000 (dashboard "Taxi demand API: four layers")
+# Ports of the monitoring services are bound to 127.0.0.1: nothing is exposed to the network.
 services:
   mlflow:
     image: ghcr.io/mlflow/mlflow:v3.18.0   # same version as step 2, never latest
@@ -8,3 +12,42 @@ services:
       --allowed-hosts "localhost,localhost:5000,127.0.0.1:5000,host.docker.internal:5000,mlflow:5000"
     ports: ["5000:5000"]
     volumes: ["./mlflow-data:/mlflow"]
+
+  api:
+    build: .                                # Dockerfile from T9
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000          # inside compose: the service name, not localhost
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?set ADMIN_TOKEN in .env (not change-me)}
+    volumes:
+      - ./data:/app/data:ro                 # demand.parquet = the PSI reference (DVC output, run dvc repro first)
+    ports: ["127.0.0.1:8000:8000"]
+    depends_on: [mlflow]
+    healthcheck:                            # python is in the image, curl may not be
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    volumes: ["./monitoring/prometheus:/etc/prometheus:ro"]
+    ports: ["127.0.0.1:9090:9090"]
+    depends_on: [api, alertmanager]
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    volumes: ["./monitoring/alertmanager:/etc/alertmanager:ro"]
+    ports: ["127.0.0.1:9093:9093"]
+
+  grafana:
+    image: grafana/grafana:12.1.0
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"       # the jury sees the dashboard without logging in
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer      # read-only for anonymous visitors
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}   # set your own in .env
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["127.0.0.1:3000:3000"]
+    depends_on: [prometheus]

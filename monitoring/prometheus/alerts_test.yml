@@ -1,0 +1,97 @@
+# Unit tests for alerts.yml: run with
+#   promtool test rules monitoring/prometheus/alerts_test.yml
+# (or: docker compose run --rm --entrypoint promtool -v ... prometheus test rules ...)
+rule_files:
+  - alerts.yml
+evaluation_interval: 15s
+
+tests:
+  - name: input drift fires after 1 minute above 0.25, per feature
+    interval: 15s
+    input_series:
+      - series: 'taxi_input_psi{feature="lag_1"}'
+        values: "0.40+0x20"
+      - series: 'taxi_input_psi{feature="lag_24"}'
+        values: "0.05+0x20"
+    alert_rule_test:
+      - eval_time: 30s
+        alertname: InputDrift
+        exp_alerts: []                       # pending: not yet 1 minute
+      - eval_time: 3m
+        alertname: InputDrift
+        exp_alerts:
+          - exp_labels: { feature: lag_1, severity: page, layer: input }
+            exp_annotations: { summary: "lag_1 drifted (PSI 0.40)" }
+
+  - name: input stays quiet under 0.25
+    interval: 15s
+    input_series:
+      - series: 'taxi_input_psi{feature="lag_1"}'
+        values: "0.08+0x20"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: InputDrift
+        exp_alerts: []
+
+  - name: prediction drift
+    interval: 15s
+    input_series:
+      - series: "taxi_prediction_psi"
+        values: "0.9+0x20"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: PredictionDrift
+        exp_alerts:
+          - exp_labels: { severity: page, layer: prediction }
+            exp_annotations: { summary: "the predictions changed shape (PSI 0.90)" }
+
+  - name: slow requests fire when every request lands between 0.2 s and 0.4 s
+    interval: 15s
+    input_series:
+      - series: 'taxi_request_seconds_bucket{endpoint="/predict",status="200",le="0.1"}'
+        values: "0+0x30"
+      - series: 'taxi_request_seconds_bucket{endpoint="/predict",status="200",le="0.2"}'
+        values: "0+0x30"
+      - series: 'taxi_request_seconds_bucket{endpoint="/predict",status="200",le="0.4"}'
+        values: "0+10x30"
+      - series: 'taxi_request_seconds_bucket{endpoint="/predict",status="200",le="+Inf"}'
+        values: "0+10x30"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: SlowRequests
+        exp_alerts:
+          - exp_labels: { severity: page, layer: infrastructure }
+            exp_annotations: { summary: "P95 latency 0.39 s, the budget is 0.2 s" }
+
+  - name: fast requests do not fire
+    interval: 15s
+    input_series:
+      - series: 'taxi_request_seconds_bucket{endpoint="/predict",status="200",le="0.1"}'
+        values: "0+10x30"
+      - series: 'taxi_request_seconds_bucket{endpoint="/predict",status="200",le="0.2"}'
+        values: "0+10x30"
+      - series: 'taxi_request_seconds_bucket{endpoint="/predict",status="200",le="+Inf"}'
+        values: "0+10x30"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: SlowRequests
+        exp_alerts: []
+
+  - name: api down and no model loaded
+    interval: 15s
+    input_series:
+      - series: 'up{job="taxi-api"}'
+        values: "0+0x20"
+      - series: "taxi_model_loaded"
+        values: "0+0x20"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: ApiDown
+        exp_alerts:
+          - exp_labels: { job: taxi-api, severity: page, layer: infrastructure }
+            exp_annotations: { summary: "the API does not answer /metrics" }
+      - eval_time: 3m
+        alertname: NoModelLoaded
+        exp_alerts:
+          - exp_labels: { severity: page, layer: model }
+            exp_annotations: { summary: "no champion model loaded: /predict answers 503" }
