@@ -87,6 +87,13 @@ def test_batch_equals_single(client):
     assert [p["predicted_pickups"] for p in batch] == singles
 
 
+def test_admin_reload_refuses_the_default_token(client, monkeypatch):
+    """The .env.example value is public: with it, admin routes stay disabled (T20 finding)."""
+    monkeypatch.setenv("ADMIN_TOKEN", "change-me")
+    resp = client.post("/admin/reload", headers={"X-Admin-Token": "change-me"})
+    assert resp.status_code == 503
+
+
 def test_admin_reload_requires_token(client, monkeypatch):
     """With ADMIN_TOKEN set, /admin/reload without the header is rejected with 401."""
     monkeypatch.setenv("ADMIN_TOKEN", "secret")

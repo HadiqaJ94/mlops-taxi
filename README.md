@@ -42,13 +42,25 @@ git clone https://github.com/HadiqaJ94/mlops-taxi.git
 cd mlops-taxi
 uv sync                         # creates .venv from uv.lock (never pip install)
 copy .env.example .env          # Windows; macOS/Linux: cp .env.example .env
+uv run python -c "import secrets; print(secrets.token_hex(16))"   # paste it as ADMIN_TOKEN in .env
 docker compose up -d mlflow     # MLflow server + UI on http://localhost:5000
-uv run dvc repro                # download -> preprocess -> validate -> train (logs to MLflow)
+uv run dvc repro                # download -> preprocess -> validate -> train; ~300 MB, ~2 min the first time
 uv run dvc repro -f -s train    # fresh MLflow: force one training run (see the note below)
 uv run python -m src.gate       # REQUIRED: promotes the new @candidate to @champion if it wins
 uv run pytest
 ```
-Edit `.env` and set your own `ADMIN_TOKEN` (it protects `/admin/reload`).
+`ADMIN_TOKEN` protects `/admin/reload`. The API refuses the default `change-me` (503), so set
+your own before the demo.
+
+> **Windows tips.**
+> - Clone into a short path (e.g. `C:\dev\mlops-taxi`): DVC's cache paths can exceed the
+>   260-character Windows limit and `dvc repro` fails with `[WinError 3]`. Or enable long paths
+>   (admin PowerShell: `Set-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem LongPathsEnabled 1`).
+> - In Windows PowerShell 5.1, `curl` is an alias of `Invoke-WebRequest`: type **`curl.exe`**
+>   for the examples below.
+> - `SSLError: CERTIFICATE_VERIFY_FAILED` during `download`: an antivirus is inspecting HTTPS
+>   (e.g. Norton Web Shield). Pause that scan for the download, or export its root certificate
+>   and set `REQUESTS_CA_BUNDLE` to that file.
 
 > **No champion until the gate has run.** Training only registers a `@candidate`; it never
 > promotes. On a fresh clone, if you skip `uv run python -m src.gate`, the registry has no
@@ -73,7 +85,7 @@ on the PC that pushed: on a fresh clone, `uv run dvc repro` rebuilds the data fr
 | Model versions and aliases | `uv run python -m src.registry status` |
 | Promote / roll back | `uv run python -m src.registry promote --version N` / `uv run python -m src.registry rollback` |
 | Run the API | `uv run uvicorn api.app:app --port 8000` (one worker). Docs: http://localhost:8000/docs |
-| Serve the new champion | after promote or rollback: `curl -X POST localhost:8000/admin/reload -H "X-Admin-Token: <ADMIN_TOKEN from .env>"` |
+| Serve the new champion | after promote or rollback: `curl.exe -X POST http://localhost:8000/admin/reload -H "X-Admin-Token: <ADMIN_TOKEN from .env>"` |
 | Build and run the API image | see "Run the API in Docker" below |
 | Stop the stack | `docker compose down` |
 
@@ -131,7 +143,7 @@ image: `MLFLOW_TRACKING_URI` and `ADMIN_TOKEN` are passed at run time.
 docker compose up -d mlflow                      # the API needs the registry
 docker build -t mlops-taxi-api:dev .
 docker run --rm -p 8000:8000 -e MLFLOW_TRACKING_URI=http://host.docker.internal:5000 -e ADMIN_TOKEN=<token> mlops-taxi-api:dev
-curl http://localhost:8000/health                # {"status":"ok","model_version":"1"}
+curl.exe http://localhost:8000/health            # {"status":"ok","model_version":"1"}
 ```
 Open http://localhost:8000/docs (not `0.0.0.0`). The MLflow server accepts requests from
 `localhost`, `host.docker.internal` and `mlflow` only (`--allowed-hosts` in `docker-compose.yml`);

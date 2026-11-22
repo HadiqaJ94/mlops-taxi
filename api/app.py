@@ -186,6 +186,9 @@ def health():
     return {"status": "ok", "model_version": current["version"]}
 
 
+DEFAULT_ADMIN_TOKEN = "change-me"  # value shipped in .env.example: never accepted
+
+
 @app.post("/admin/reload")
 def reload_model(x_admin_token: str | None = Header(default=None)):
     """Re-read the alias and swap the model in without a restart (used after promote/rollback, T18).
@@ -193,8 +196,9 @@ def reload_model(x_admin_token: str | None = Header(default=None)):
     Requires header X-Admin-Token == ADMIN_TOKEN (from .env). On failure the current model keeps serving.
     """
     expected = os.getenv("ADMIN_TOKEN")
-    if not expected:
-        raise HTTPException(status_code=503, detail="admin routes disabled: ADMIN_TOKEN is not set")
+    if not expected or expected == DEFAULT_ADMIN_TOKEN:  # the .env.example value is public
+        raise HTTPException(status_code=503,
+                            detail="admin routes disabled: set your own ADMIN_TOKEN in .env (not change-me)")
     if not x_admin_token or not secrets.compare_digest(x_admin_token, expected):
         raise HTTPException(status_code=401, detail="invalid or missing X-Admin-Token")
 
