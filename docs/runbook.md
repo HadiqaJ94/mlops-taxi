@@ -44,13 +44,13 @@ Agreed in advance so nobody debates it during an incident: **<project on-call ow
    ```
    uv run python -m src.registry rollback
    ```
-3. **Reload the live API** — serves the restored model, no restart:
+3. **Reload the live API** — serves the restored model, no restart (`curl.exe` is for Windows PowerShell; on macOS/Linux type `curl`):
    ```
-   curl -X POST http://localhost:8000/admin/reload -H "X-Admin-Token: $ADMIN_TOKEN"
+   curl.exe -X POST http://localhost:8000/admin/reload -H "X-Admin-Token: <ADMIN_TOKEN from .env>"
    ```
 4. **Verify** (this step closes the "forgot to reload" loophole):
    ```
-   curl http://localhost:8000/health
+   curl.exe http://localhost:8000/health
    uv run python -m src.registry status
    ```
    - `/health` must report the **restored** `model_version`.
@@ -81,6 +81,6 @@ This also creates the promotion history that makes a real rollback possible.
 2. Promote it (moves `champion` to v2 and tags it `replaces=v1`):
    ```
    uv run python -m src.registry promote --version 2
-   curl -X POST http://localhost:8000/admin/reload -H "X-Admin-Token: $ADMIN_TOKEN"
+   curl.exe -X POST http://localhost:8000/admin/reload -H "X-Admin-Token: <ADMIN_TOKEN from .env>"
    ```
 3. Roll back by following §4. Confirm `champion` returns to v1 and `/health` shows v1.
