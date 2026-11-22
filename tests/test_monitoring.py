@@ -4,7 +4,6 @@ import logging
 
 import numpy as np
 import pandas as pd
-import pytest
 from prometheus_client import REGISTRY
 
 from api import monitoring
