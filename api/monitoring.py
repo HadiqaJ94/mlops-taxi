@@ -115,7 +115,8 @@ class Monitor:
         self.use_window(None)
 
     def use_window(self, window) -> str:
-        """Reference = the model's training window (start, end), both included.
+        """Reference = the model's training window (start, end): start included, end excluded
+        (the same rule as window() in src/train.py).
 
         None -> the reference period of the project (the first model). An empty or unknown window
         falls back to the reference period rather than monitoring against nothing.
@@ -125,7 +126,7 @@ class Monitor:
         label = "reference period"
         if window is not None:
             start, end = window
-            picked = feats[(feats["pickup_hour"] >= start) & (feats["pickup_hour"] <= end)]
+            picked = feats[(feats["pickup_hour"] >= start) & (feats["pickup_hour"] < end)]
             if picked.empty:
                 log.warning("training window %s..%s not in the data: using the reference period", start, end)
             else:
@@ -155,7 +156,7 @@ class Monitor:
         """Called at startup and after every /admin/reload.
 
         The reference follows the model: the first model was trained on the reference period, a
-        retrained one on a recent window (MLflow tags train_start / train_end, see train_window()).
+        retrained one on a recent window (MLflow tag `train_window`, see train_window()).
         Without this, a retrained model would be compared with Jan-Feb forever and the alerts
         would never clear.
         """
@@ -198,18 +199,19 @@ class Monitor:
 
 
 def train_window(client, model_name: str, version: str):
-    """(start, end) of the training window of a model version, from the tags of its MLflow run.
+    """(start, end) of the training window of a model version, from the tag `train_window` of its run.
 
-    train.py / retrain.py must log the tags `train_start` and `train_end` (ISO hours, first and last
-    pickup_hour of the training rows). Returns None when they are missing (models trained before
-    this contract): the monitor then uses the reference period.
+    src/train.py logs it as "<start>..<end>" (end excluded), and retrain.py reuses log_and_register,
+    so a retrained model carries the same tag. Returns None when it is missing: the monitor then
+    uses the reference period.
     """
     try:
         run_id = client.get_model_version(model_name, str(version)).run_id
-        tags = client.get_run(run_id).data.tags
-        if "train_start" in tags and "train_end" in tags:
-            return pd.Timestamp(tags["train_start"]), pd.Timestamp(tags["train_end"])
-        log.info("v%s has no train_start/train_end tags: reference = reference period", version)
+        tag = client.get_run(run_id).data.tags.get("train_window")
+        if tag and ".." in tag:
+            first, _, last = tag.partition("..")
+            return pd.Timestamp(first), pd.Timestamp(last)
+        log.info("v%s has no train_window tag: reference = reference period", version)
     except Exception as exc:  # noqa: BLE001  (MLflow down or run deleted: fall back, never crash)
         log.warning("cannot read the training window of v%s: %s", version, exc)
     return None
