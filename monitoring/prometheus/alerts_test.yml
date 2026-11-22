@@ -95,3 +95,29 @@ tests:
         exp_alerts:
           - exp_labels: { severity: page, layer: model }
             exp_annotations: { summary: "no champion model loaded: /predict answers 503" }
+
+  - name: no data yet (NaN) never fires the mean-shift alert, and a real shift does
+    interval: 15s
+    input_series:
+      - series: "taxi_prediction_mean"
+        values: "NaN+0x20"
+      - series: "taxi_reference_prediction_mean"
+        values: "15+0x20"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: PredictionMeanShift
+        exp_alerts: []
+
+  - name: a real collapse to zero mean prediction still fires
+    interval: 15s
+    input_series:
+      - series: "taxi_prediction_mean"
+        values: "0+0x20"
+      - series: "taxi_reference_prediction_mean"
+        values: "15+0x20"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: PredictionMeanShift
+        exp_alerts:
+          - exp_labels: { severity: ticket, layer: prediction }
+            exp_annotations: { summary: "mean prediction 100% away from the reference mean" }
