@@ -43,6 +43,7 @@ on the PC that pushed: on a fresh clone, `uv run dvc repro` rebuilds the data fr
 | Add a dependency | `uv add <pkg>` (dev tool: `uv add --dev <pkg>`) |
 | Rebuild data and model | `uv run dvc repro` (force training: `uv run dvc repro -f -s train`), then `uv run python -m src.gate` |
 | Decide on a promotion | `uv run python -m src.gate` (decide only: `--dry-run`) |
+| Retrain on drift | `uv run python -m src.retrain` (`--force`, `--as-of YYYY-MM-DD`, `--dry-run`) |
 | Tests and lint | `uv run pytest` and `uv run ruff check .` |
 | Model versions and aliases | `uv run python -m src.registry status` |
 | Promote / roll back | `uv run python -m src.registry promote --version N` / `uv run python -m src.registry rollback` |
@@ -138,6 +139,78 @@ What it finds on the TLC data:
 | 2-9 March 2020 | 0.002 | 0.002 | 0.12 | no |
 | 9-23 March 2020 (lockdown) | 0.73 | 0.36 | 0.23, then 1.17 | yes |
 | 25 May-1 June 2020 | 6.1 | 5.6 | 0.66 | yes |
+
+## Retraining
+`src/retrain.py` reacts to drift: it checks the most recent week with `src/drift.py`, and if there
+is drift it retrains on the weeks just before, registers the result as `@candidate` and hands it
+to the training gate, which compares it with the champion **on that same recent week**.
+
+```bash
+uv run python -m src.retrain                    # drift check on the last week of data; retrain only if drift
+uv run python -m src.retrain --force            # retrain even without drift (trigger=manual)
+uv run python -m src.retrain --as-of 2020-03-23 --force   # as if "now" were 23 March 2020 (incident demo)
+uv run python -m src.retrain --dry-run --force  # train and decide in memory: nothing registered or promoted
+```
+
+Windows (`params.yaml` -> `retrain`), all ending at `as_of` (excluded; default = end of the data):
+
+| Window | Default | Used for |
+|---|---|---|
+| validation = `[as_of - val_weeks, as_of)` | 1 week | drift check, candidate metrics, gate |
+| training = `[val_start - train_weeks, val_start)` | 8 weeks | fitting the new model |
+
+No leakage: every training row is strictly before the validation week, and lags only look back.
+`--train-weeks` / `--val-weeks` override the params; if the training window would start before the
+first hour with a full week of lags (8 Jan 2020), the run stops with an error.
+`--drift-report FILE` reuses an existing drift report instead of running the check.
+Without a champion, the drift check falls back to the input check only (`--no-model`).
+
+Outputs: `reports/retrain_report.json` (drift found or not, features in drift, windows, candidate
+version and WAPE, gate decision), plus `reports/drift_report.json` and `reports/gate_report.json`.
+The MLflow run is tagged `trigger=drift|manual`, `training_period=recent`, `as_of`, the windows and
+the drift report path. Exit code 0 for "no retrain needed", promoted and rejected; 1 on an error.
+After a promotion, reload the running API (`/admin/reload`).
+
+What it does on the TLC data:
+
+| `as_of` | Drift | Candidate WAPE | Champion WAPE | Gate |
+|---|---|---|---|---|
+| 2020-03-09 (`--train-weeks 6`) | no | - | - | no retrain |
+| 2020-03-23 (lockdown week) | yes | 0.69 | 1.17 (v1, Jan-Feb) | promoted |
+| 2020-07-01 (end of data) | yes | 0.21 | 0.28 (v4, the March retrain) | promoted |
+
+`drift.py` always compares with the original reference period (Jan-Feb 2020), so after a
+retraining on recent weeks it keeps reporting input drift; the gate, not the drift flag, is what
+protects the champion.
+
+## CI workflows
+| Workflow | Trigger | What it runs |
+|---|---|---|
+| `ci.yml` | every pull request and push to `master` | `ruff check`, `pytest` |
+| `train.yml` | manual (input: `min_improvement`) | `dvc repro validate` -> forced `train` stage -> `src.gate` |
+| `retrain.yml` | every Monday 06:00 UTC + manual (inputs: `force`, `as_of`) | same setup, reference model gated to champion, then `src.retrain` (drift check -> retrain -> gate) |
+
+Run one: GitHub -> **Actions** -> pick `train` or `retrain` -> **Run workflow** -> fill the inputs.
+The reports are attached to the run as **artifacts** (bottom of the run page): `train-reports`
+(`metrics.json`, `gate_report.json`, data quality and validation reports) and `retrain-reports`
+(`drift_report.json`, `retrain_report.json`, `gate_report.json`). They are uploaded even when a
+step fails. A scheduled workflow only runs from the default branch.
+
+How they cope with what a runner does not have:
+- **No team MLflow server**: `MLFLOW_TRACKING_URI=sqlite:///mlflow.db`, a registry inside the
+  runner, deleted with it. Same code path as local runs (it is `src/registry.py`'s default), and no
+  service container, port or `--allowed-hosts` to manage.
+- **No DVC remote** (it is a folder on one laptop): `dvc repro` rebuilds the data from the TLC files
+  (~300 MB). `actions/cache` keeps `data/raw` between runs, keyed on the download params and
+  `src/data/download.py`. Training is forced (`--force --single-item train`), because rebuilt data
+  matches `dvc.lock` and DVC would otherwise skip it.
+- Drift is not a failure: `src.retrain` runs `src.drift` itself and turns its exit code 1 into a
+  decision (retrain or not); the job fails only on a real error.
+
+**Trade-off:** the CI registry starts empty and disappears after the job, so these workflows do not
+promote anything the API serves. They prove that the pipeline (data -> train -> gate -> drift ->
+retrain -> gate) is reproducible from a clean machine and leave the evidence as artifacts. Real
+promotions are made against the team's MLflow server, with the same commands run locally.
 
 ## Incident simulation
 `src/simulate_incident.py` replays real taxi traffic against the running API: first a normal week,
