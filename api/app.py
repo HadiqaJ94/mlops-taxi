@@ -27,6 +27,7 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from api import monitoring
 from src import registry
 from src.config import load_params
 from src.features import serving_features
@@ -63,8 +64,11 @@ def load_champion() -> dict:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    monitoring.setup_logging()
+    monitoring.monitor.load_reference()  # PSI reference profiles, computed once
     try:
         state["current"] = load_champion()
+        monitoring.monitor.on_model_loaded(state["current"]["model"], state["current"]["version"])
     except Exception:  # start degraded rather than not at all: /health says why
         log.exception("no model loaded, the service starts degraded")
     yield
@@ -77,15 +81,19 @@ app = FastAPI(
     description="Pickups per zone for the next hour. Data: NYC TLC Trip Record Data.",
     lifespan=lifespan,
 )
+app.include_router(monitoring.router)  # GET /metrics (Prometheus)
 
 
 @app.middleware("http")
 async def request_context(request: Request, call_next):
     request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
+    monitoring.request_id_var.set(request_id)  # every log line of this request carries it
     start = time.perf_counter()
     response = await call_next(request)
+    seconds = time.perf_counter() - start
     response.headers["X-Request-ID"] = request_id
-    response.headers["X-Process-Time-Ms"] = f"{(time.perf_counter() - start) * 1000:.1f}"
+    response.headers["X-Process-Time-Ms"] = f"{seconds * 1000:.1f}"
+    monitoring.record_request(request, response.status_code, seconds)
     return response
 
 
@@ -156,6 +164,7 @@ def predict_many(items: list[DemandRequest]) -> tuple[str, list[Prediction]]:
     y = np.clip(current["model"].predict(features), 0, None)  # counts cannot be negative
     model_ms = round((time.perf_counter() - t0) * 1000, 2)
     version = current["version"]
+    monitoring.monitor.observe(features, y, version)  # layers 2 and 3
     return version, [
         Prediction(zone_id=it.zone_id, target_hour=it.target_hour,
                    predicted_pickups=round(float(p), 3), model_version=version, model_ms=model_ms)
@@ -209,4 +218,5 @@ def reload_model(x_admin_token: str | None = Header(default=None)):
         log.exception("reload failed, keeping v%s", previous)
         raise HTTPException(status_code=503, detail=f"reload failed, still serving v{previous}: {exc}")
     state["current"] = new
+    monitoring.monitor.on_model_loaded(new["model"], new["version"])
     return {"previous_version": previous, "model_version": new["version"]}
