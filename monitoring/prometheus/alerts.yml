@@ -1,0 +1,52 @@
+# One rule per layer. `for: 1m` is a demo value (fast feedback in the incident);
+# production would use about 10m to avoid paging on a blip.
+# Layer 4 (outcome, WAPE per week) is not live: labels arrive late. `uv run python -m src.drift`
+# reports it and exits 1 on a performance drop.
+groups:
+  - name: taxi-api
+    rules:
+      # ---- layer 1: infrastructure ----
+      - alert: ApiDown
+        expr: up{job="taxi-api"} == 0
+        for: 1m
+        labels: { severity: page, layer: infrastructure }
+        annotations:
+          summary: "the API does not answer /metrics"
+
+      - alert: SlowRequests
+        expr: histogram_quantile(0.95, sum by (le) (rate(taxi_request_seconds_bucket{endpoint=~"/predict.*"}[1m]))) > 0.2
+        for: 1m
+        labels: { severity: page, layer: infrastructure }
+        annotations:
+          summary: "P95 latency {{ $value | printf \"%.2f\" }} s, the budget is 0.2 s"
+
+      # ---- model lifecycle: the service is up but cannot answer ----
+      - alert: NoModelLoaded
+        expr: taxi_model_loaded == 0
+        for: 1m
+        labels: { severity: page, layer: model }
+        annotations:
+          summary: "no champion model loaded: /predict answers 503"
+
+      # ---- layer 2: input ----
+      - alert: InputDrift
+        expr: taxi_input_psi > 0.25          # same "act" level as psi_act in params.yaml
+        for: 1m
+        labels: { severity: page, layer: input }
+        annotations:
+          summary: "{{ $labels.feature }} drifted (PSI {{ $value | printf \"%.2f\" }})"
+
+      # ---- layer 3: prediction ----
+      - alert: PredictionDrift
+        expr: taxi_prediction_psi > 0.25
+        for: 1m
+        labels: { severity: page, layer: prediction }
+        annotations:
+          summary: "the predictions changed shape (PSI {{ $value | printf \"%.2f\" }})"
+
+      - alert: PredictionMeanShift
+        expr: abs(taxi_prediction_mean - taxi_reference_prediction_mean) / taxi_reference_prediction_mean > 0.5
+        for: 1m
+        labels: { severity: ticket, layer: prediction }
+        annotations:
+          summary: "mean prediction {{ $value | humanizePercentage }} away from the reference mean"
