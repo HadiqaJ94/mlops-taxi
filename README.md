@@ -26,6 +26,57 @@ https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page. Raw files are not 
 | T15 | CI: build and push the Docker image | Hadiqa | to do |
 | T20, T21 | Fresh-clone test, presentation | all | to do |
 
+## Architecture
+
+```mermaid
+flowchart LR
+  subgraph DATA["Data pipeline (DVC)"]
+    TLC[("TLC trip files
+Jan-Jun 2020")] --> DL[download] --> PRE[preprocess
+zone x hour] --> VAL{validate
+pandera} --> TR[train]
+  end
+  subgraph REG["MLflow"]
+    RUNS[(runs: params, metrics,
+commit, data hash)]
+    CAND[[@candidate]]
+    CHAMP[[@champion]]
+  end
+  TR --> RUNS
+  TR --> CAND --> GATE{gate
+beats baseline
+and champion?}
+  GATE -- yes --> CHAMP
+  subgraph SERVE["Serving (Docker)"]
+    API[FastAPI
+/predict /health
+/admin/reload]
+  end
+  CHAMP -- loaded at startup / reload --> API
+  CLIENT[clients +
+simulate_incident] --> API
+  subgraph MON["Monitoring"]
+    MET[/metrics/] --> PROM[Prometheus] --> GRAF[Grafana]
+    PROM --> ALERT[Alertmanager]
+  end
+  API --> MET
+  subgraph LOOP["Feedback loop"]
+    DRIFT{drift check
+PSI + weekly WAPE} -- drift --> RET[retrain
+last 8 weeks]
+    RB[rollback
+runbook]
+  end
+  ALERT --> DRIFT
+  RET --> CAND
+  RB -- previous version --> CHAMP
+  subgraph CI["GitHub Actions"]
+    C1[ci.yml
+lint + tests] ~~~ C2[train.yml] ~~~ C3[retrain.yml
+weekly] ~~~ C4[docker.yml]
+  end
+```
+
 ## Prerequisites
 - Git, Docker Desktop (running), and uv: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
   (macOS/Linux: `curl -LsSf https://astral.sh/uv/install.sh | sh`). uv installs the right Python (3.15) itself.
