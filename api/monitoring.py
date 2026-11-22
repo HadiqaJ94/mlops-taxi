@@ -58,6 +58,13 @@ REFERENCE_PREDICTION_MEAN = Gauge("taxi_reference_prediction_mean",
 
 MODEL_LOADED.set(0)  # until the first successful load
 
+# An unlabeled Gauge that was never set is exported as 0.0, which Prometheus reads as a real value:
+# a mean prediction of 0 would fire PredictionMeanShift at startup. NaN means "no data yet":
+# every comparison with NaN is false, so no alert, and Grafana draws nothing.
+NAN = float("nan")
+for _gauge in (PREDICTION_PSI, PREDICTION_MEAN, REFERENCE_PREDICTION_MEAN):
+    _gauge.set(NAN)
+
 
 # ---------- live monitor ----------
 
@@ -68,9 +75,11 @@ class Monitor:
         self.window = window or int(os.getenv("MONITOR_WINDOW", "300"))       # rows kept
         self.every = every or int(os.getenv("MONITOR_PSI_EVERY", "20"))       # recompute every N rows
         self.lock = threading.Lock()
-        self.reference: pd.DataFrame | None = None
-        self.cols: list[str] = []
+        self.features: pd.DataFrame | None = None   # the whole feature table (all periods)
+        self.names: list[str] = []                  # monitored features
+        self.cols: list[str] = []                   # model input columns
         self.bins = 10
+        self.reference: pd.DataFrame | None = None  # rows the live traffic is compared with
         self.profiles: dict[str, tuple[np.ndarray, np.ndarray]] = {}
         self.pred_profile: tuple[np.ndarray, np.ndarray] | None = None
         self.inputs: dict[str, deque] = {}
@@ -80,22 +89,56 @@ class Monitor:
     # -- reference --
 
     def set_reference(self, reference: pd.DataFrame, names: list[str], cols: list[str], bins: int = 10):
-        """Profile (decile edges + shares) of each monitored feature, computed ONCE."""
-        self.reference, self.cols, self.bins = reference, cols, bins
-        self.profiles = {}
+        """Profile (decile edges + shares) of each monitored feature, computed ONCE per reference.
+
+        Everything derived from the previous reference is dropped: the live windows are emptied and
+        the gauges go back to NaN, so an alert on the old reference clears instead of going stale.
+        """
+        profiles = {}
         for name in names:
             edges = bin_edges(reference[name], bins)
-            self.profiles[name] = (edges, proportions(reference[name], edges))
-        self.inputs = {name: deque(maxlen=self.window) for name in names}
-        self.preds = deque(maxlen=self.window)
-        self.since = 0
+            profiles[name] = (edges, proportions(reference[name], edges))
+        with self.lock:
+            self.reference, self.cols, self.bins, self.profiles = reference, cols, bins, profiles
+            self.inputs = {name: deque(maxlen=self.window) for name in names}
+            self.preds = deque(maxlen=self.window)
+            self.pred_profile = None
+            self.since = 0
+        for name in names:
+            INPUT_PSI.labels(name).set(NAN)
+        PREDICTION_PSI.set(NAN)
+        PREDICTION_MEAN.set(NAN)
+
+    def set_features(self, features: pd.DataFrame, names: list[str], cols: list[str], bins: int = 10):
+        """Keep the whole feature table; the reference is picked from it by use_window()."""
+        self.features, self.names, self.cols, self.bins = features, names, cols, bins
+        self.use_window(None)
+
+    def use_window(self, window) -> str:
+        """Reference = the model's training window (start, end), both included.
+
+        None -> the reference period of the project (the first model). An empty or unknown window
+        falls back to the reference period rather than monitoring against nothing.
+        """
+        feats = self.features
+        rows = feats[feats["period"] == "reference"]
+        label = "reference period"
+        if window is not None:
+            start, end = window
+            picked = feats[(feats["pickup_hour"] >= start) & (feats["pickup_hour"] <= end)]
+            if picked.empty:
+                log.warning("training window %s..%s not in the data: using the reference period", start, end)
+            else:
+                rows, label = picked, f"training window {start}..{end}"
+        self.set_reference(rows[self.cols], self.names, self.cols, self.bins)
+        return f"{label}, {len(rows)} rows"
 
     def load_reference(self) -> None:
-        """Reference = the training period of demand.parquet, same definition as src/drift.py.
+        """Feature table from demand.parquet, same features as src/drift.py.
 
         The API still starts when the file is missing (CI, a bare container): no PSI then.
         """
-        if self.reference is not None:
+        if self.features is not None:
             return
         if not DEMAND_PATH.exists():
             log.warning("no %s: input and prediction PSI gauges are disabled", DEMAND_PATH)
@@ -105,28 +148,32 @@ class Monitor:
         cols = feature_columns(lags)
         names = [n for n in cfg["features"] if n in cols]  # only what the API sees at serving time
         feats = build_features(pd.read_parquet(DEMAND_PATH), lags)
-        ref = feats[feats["period"] == "reference"]
-        self.set_reference(ref[cols], names, cols, cfg["bins"])
-        log.info("PSI reference loaded: %d rows, features %s", len(ref), names)
+        self.set_features(feats[[*cols, "pickup_hour", "period"]], names, cols, cfg["bins"])
+        log.info("PSI features loaded: %d rows, monitored %s", len(feats), names)
 
-    def on_model_loaded(self, model, version: str) -> None:
-        """Called at startup and after every /admin/reload: the prediction reference is per model."""
+    def on_model_loaded(self, model, version: str, train_window=None) -> None:
+        """Called at startup and after every /admin/reload.
+
+        The reference follows the model: the first model was trained on the reference period, a
+        retrained one on a recent window (MLflow tags train_start / train_end, see train_window()).
+        Without this, a retrained model would be compared with Jan-Feb forever and the alerts
+        would never clear.
+        """
         MODEL_LOADED.set(1)
-        if self.reference is None:
+        if self.features is None:
             return
+        what = self.use_window(train_window)
         try:
             ref_pred = np.clip(model.predict(self.reference[self.cols]), 0, None)
         except Exception:
-            log.exception("cannot score the reference period: prediction PSI disabled")
-            self.pred_profile = None
+            log.exception("cannot score the reference: prediction PSI disabled")
             return
         edges = bin_edges(ref_pred, self.bins)
-        self.pred_profile = (edges, proportions(ref_pred, edges))
-        REFERENCE_PREDICTION_MEAN.set(float(ref_pred.mean()))
         with self.lock:
-            self.preds.clear()  # predictions of the old model must not be compared with this reference
-            self.since = 0
-        log.info("model v%s loaded, reference prediction mean %.2f", version, ref_pred.mean())
+            self.pred_profile = (edges, proportions(ref_pred, edges))
+        REFERENCE_PREDICTION_MEAN.set(float(ref_pred.mean()))
+        log.info("model v%s loaded, reference = %s, reference prediction mean %.2f",
+                 version, what, ref_pred.mean())
 
     # -- live --
 
@@ -140,7 +187,7 @@ class Monitor:
                 window.extend(features[name].to_numpy(dtype=float))
             self.since += n
             if len(self.preds) < self.window or self.since < self.every:
-                return  # window not full yet, or too soon: nothing is faked, the gauge stays absent
+                return  # window not full yet, or too soon: the gauges stay NaN, nothing is faked
             self.since = 0
             for name, (edges, props) in self.profiles.items():
                 INPUT_PSI.labels(name).set(psi_from_profile(edges, props, np.array(self.inputs[name])))
@@ -148,6 +195,24 @@ class Monitor:
             PREDICTION_MEAN.set(float(current.mean()))
             if self.pred_profile is not None:
                 PREDICTION_PSI.set(psi_from_profile(*self.pred_profile, current))
+
+
+def train_window(client, model_name: str, version: str):
+    """(start, end) of the training window of a model version, from the tags of its MLflow run.
+
+    train.py / retrain.py must log the tags `train_start` and `train_end` (ISO hours, first and last
+    pickup_hour of the training rows). Returns None when they are missing (models trained before
+    this contract): the monitor then uses the reference period.
+    """
+    try:
+        run_id = client.get_model_version(model_name, str(version)).run_id
+        tags = client.get_run(run_id).data.tags
+        if "train_start" in tags and "train_end" in tags:
+            return pd.Timestamp(tags["train_start"]), pd.Timestamp(tags["train_end"])
+        log.info("v%s has no train_start/train_end tags: reference = reference period", version)
+    except Exception as exc:  # noqa: BLE001  (MLflow down or run deleted: fall back, never crash)
+        log.warning("cannot read the training window of v%s: %s", version, exc)
+    return None
 
 
 monitor = Monitor()
