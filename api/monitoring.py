@@ -23,7 +23,13 @@ from contextvars import ContextVar
 import numpy as np
 import pandas as pd
 from fastapi import APIRouter, Request, Response
-from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
+from prometheus_client import (
+    CONTENT_TYPE_LATEST,
+    Counter,
+    Gauge,
+    Histogram,
+    generate_latest,
+)
 
 from src.config import DEMAND_PATH, load_params
 from src.drift import bin_edges, proportions, psi_from_profile
