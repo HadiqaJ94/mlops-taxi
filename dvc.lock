@@ -85,8 +85,8 @@ stages:
       size: 2882
     - path: src/train.py
       hash: md5
-      md5: 4ba17b6cfa296e8b848fef5e74d2ed05
-      size: 5623
+      md5: cb58d5fbef2c5f55201acae6ef837841
+      size: 7805
     params:
       params.yaml:
         features:
@@ -96,6 +96,8 @@ stages:
           - 3
           - 24
           - 168
+        gate.val_end: '2020-03-01'
+        gate.val_start: '2020-02-16'
         mlflow:
           experiment: nyc-taxi-demand
           registered_model: taxi-demand-forecaster

@@ -18,10 +18,20 @@ cd mlops-taxi
 uv sync                         # creates .venv from uv.lock (never pip install)
 copy .env.example .env          # Windows; macOS/Linux: cp .env.example .env
 docker compose up -d mlflow     # MLflow server + UI on http://localhost:5000
-uv run dvc repro                # download -> preprocess -> train (logs to MLflow)
+uv run dvc repro                # download -> preprocess -> validate -> train (logs to MLflow)
+uv run dvc repro -f -s train    # fresh MLflow: force one training run (see the note below)
+uv run python -m src.gate       # REQUIRED: promotes the new @candidate to @champion if it wins
 uv run pytest
 ```
 Edit `.env` and set your own `ADMIN_TOKEN` (it protects `/admin/reload`).
+
+> **No champion until the gate has run.** Training only registers a `@candidate`; it never
+> promotes. On a fresh clone, if you skip `uv run python -m src.gate`, the registry has no
+> `@champion` and the API starts degraded: `/health` and `/predict` answer `503`.
+>
+> **Why `-f -s train` on a fresh clone:** the rebuilt data is byte-identical to the one in
+> `dvc.lock`, so DVC considers `train` up to date and skips it, and your empty MLflow gets no
+> model. Forcing the single `train` stage registers one.
 
 The DVC remote is the folder `dvc-storage` next to the repo folder (`../dvc-storage`).
 `uv run dvc push` saves the data there; `uv run dvc pull` gets it back. That folder only exists
@@ -31,7 +41,8 @@ on the PC that pushed: on a fresh clone, `uv run dvc repro` rebuilds the data fr
 | Task | Command |
 |---|---|
 | Add a dependency | `uv add <pkg>` (dev tool: `uv add --dev <pkg>`) |
-| Rebuild data and model | `uv run dvc repro` (force training: `uv run dvc repro -f -s train`) |
+| Rebuild data and model | `uv run dvc repro` (force training: `uv run dvc repro -f -s train`), then `uv run python -m src.gate` |
+| Decide on a promotion | `uv run python -m src.gate` (decide only: `--dry-run`) |
 | Tests and lint | `uv run pytest` and `uv run ruff check .` |
 | Model versions and aliases | `uv run python -m src.registry status` |
 | Promote / roll back | `uv run python -m src.registry promote --version N` / `uv run python -m src.registry rollback` |
@@ -55,6 +66,35 @@ Every prediction returns `model_version` and `model_ms` (time inside the model);
 `X-Request-ID` and `X-Process-Time-Ms` headers.
 Status codes: `422` bad input (the body names the field; also a zone the model does not serve),
 `503` no model, `401` wrong or missing admin token.
+
+## Training gate
+`src/train.py` trains, logs the run to MLflow and registers the new version as `@candidate`. It
+never touches `@champion`. `src/gate.py` decides:
+
+```bash
+uv run dvc repro                 # registers a new version as @candidate
+uv run python -m src.gate        # promotes it only if it wins; writes reports/gate_report.json
+uv run python -m src.gate --dry-run                                  # decide, change nothing
+uv run python -m src.gate --val-start 2020-06-24 --val-end 2020-07-01   # another window (used by retraining)
+```
+
+The candidate, the current champion and the "same hour last week" baseline are scored on **the same
+rows**: a fixed validation window, `params.yaml` -> `gate` (16-29 Feb 2020, the last 14 days of the
+reference period, which `train.py` also validates on). The candidate is promoted only if:
+
+1. its WAPE is strictly below the baseline's, and
+2. there is no champion yet, or its WAPE is at most `champion WAPE x (1 - min_improvement)`.
+
+`min_improvement: 0.01` (1%): retraining the same data gives the same WAPE to 4 decimals, and a
+model that is not measurably better should not replace the one in production (with 0, every
+re-run would swap the champion for an identical model).
+
+Every decision is tagged on the candidate version in MLflow (`gate_decision` = `promoted` or
+`rejected`, `gate_reason`, `gate_candidate_wape`, `gate_baseline_wape`, `gate_champion_wape`,
+`gate_window`). Promotion goes through `registry.promote`, so the `replaces` tag that rollback needs
+is set as before. Exit code 0 for both promoted and rejected; 1 on an error (no `@candidate`,
+MLflow unreachable, empty window). The gate is not a DVC stage: it depends on the registry state,
+which DVC cannot track. After a promotion, reload the running API (`/admin/reload`).
 
 ## Run the API in Docker
 The image installs only the runtime dependencies from `uv.lock` (`uv sync --locked --no-dev`),
@@ -135,7 +175,8 @@ A 20-second run per phase, at 20 requests per second, with model v1:
 - Time-based split: reference = 2020-01..02 (train/validation), drift = 2020-03..06 (COVID collapse).
 - Zero-filled zone x hour grid: an hour with no trip is a 0, not a missing row.
 - `src/features.py` is shared by training and the API (no train/serve skew).
-- Registry aliases: the API serves `models:/taxi-demand-forecaster@champion`; new versions start as `candidate`.
+- Registry aliases: the API serves `models:/taxi-demand-forecaster@champion`; new versions start as
+  `candidate`, and only the training gate (`src/gate.py`) moves `champion` forward.
 - Every MLflow run logs params, metrics, git commit, and the SHA-256 of the training data.
 - `.gitattributes` forces LF line endings and the pipeline writes its JSON files with LF, so DVC
   hashes (and `dvc.lock`) are identical on Windows, macOS and Linux.
