@@ -178,9 +178,10 @@ class FakeClient:
         return type("Run", (), {"data": type("D", (), {"tags": self.tags})})
 
 
-def test_train_window_reads_the_run_tags():
-    tags = {"train_start": "2020-04-01T00:00:00", "train_end": "2020-04-28T23:00:00"}
+def test_train_window_reads_the_run_tag():
+    """The tag train.py already logs: f"{train_start}..{val_start}"."""
+    tags = {"train_window": "2020-04-01 00:00:00..2020-04-29 00:00:00"}
     assert monitoring.train_window(FakeClient(tags), "m", "2") == (
-        pd.Timestamp("2020-04-01"), pd.Timestamp("2020-04-28 23:00"))
-    assert monitoring.train_window(FakeClient({}), "m", "1") is None       # models without the tags
+        pd.Timestamp("2020-04-01"), pd.Timestamp("2020-04-29"))
+    assert monitoring.train_window(FakeClient({}), "m", "1") is None       # a run without the tag
     assert monitoring.train_window(FakeClient(fail=True), "m", "1") is None  # MLflow down: no crash
