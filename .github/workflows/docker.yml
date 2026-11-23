@@ -1,0 +1,48 @@
+name: docker
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7
+
+      - name: Image name (tag = short commit SHA, never latest)
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: docker build -t "$IMAGE" .
+
+      - name: Smoke test
+        run: |
+          docker run -d --name api -p 8000:8000 "$IMAGE"
+          for i in $(seq 1 30); do curl -sf localhost:8000/docs > /dev/null && break; sleep 2; done
+          curl -sf localhost:8000/docs > /dev/null
+          code=$(curl -s -o /dev/null -w "%{http_code}" localhost:8000/health)
+          echo "/health -> $code"
+          test "$code" = "200" -o "$code" = "503"
+
+      - name: Container logs
+        if: always()
+        run: docker logs api || true
+
+      - name: Push to GHCR
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker push "$IMAGE"
