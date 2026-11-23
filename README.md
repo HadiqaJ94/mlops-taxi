@@ -291,3 +291,27 @@ A 20-second run per phase, at 20 requests per second, with model v1:
 - `.gitattributes` forces LF line endings and the pipeline writes its JSON files with LF, so DVC
   hashes (and `dvc.lock`) are identical on Windows, macOS and Linux.
 - Metrics: MAE, RMSE, WAPE, compared with a "same hour last week" baseline.
+
+## Load test (T14)
+
+`POST /predict` was load-tested with Locust (`locustfile.py`) against the Docker image
+(one uvicorn worker, `OMP_NUM_THREADS=1`), using only zones the model serves. Budget:
+95th-percentile latency under 200 ms.
+
+| Concurrent users | P95 latency | Throughput | Failures |
+|---|---|---|---|
+| 1   | 16 ms   | ~26 req/s  | 0% |
+| 20  | 150 ms  | ~141 req/s | 0% |
+| 40  | 370 ms  | ~145 req/s | 0% |
+| 200 | 1700 ms | ~136 req/s | 0% |
+
+**Result: the service sustains ~140 requests/second while keeping P95 under 200 ms**
+(around 20 concurrent users). Throughput plateaus near 145 req/s — the single-worker
+ceiling — so beyond that point the limit is latency, not errors (0% failures at every
+level). To serve more, add uvicorn workers or run more API replicas behind a load balancer.
+
+Reproduce:
+```
+docker compose up -d --build
+uv run locust -f locustfile.py --host http://localhost:8000   # UI at http://localhost:8089
+```
