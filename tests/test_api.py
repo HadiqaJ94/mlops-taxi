@@ -99,3 +99,46 @@ def test_admin_reload_requires_token(client, monkeypatch):
     monkeypatch.setenv("ADMIN_TOKEN", "secret")
     resp = client.post("/admin/reload")
     assert resp.status_code == 401
+
+
+@pytest.fixture
+def degraded_client(monkeypatch):
+    """A TestClient whose startup FAILS to load a model, so the service runs degraded."""
+
+    def fail_load():
+        raise RuntimeError("no model available")
+
+    monkeypatch.setattr(app_module, "load_champion", fail_load)
+    app_module.state["current"] = None  # ensure degraded even if a prior test left a model loaded
+    with TestClient(app_module.app) as c:
+        yield c
+
+
+def test_no_model_serves_503(degraded_client):
+    """With no model loaded the service stays up: /health and /predict answer 503, not a crash."""
+    health = degraded_client.get("/health")
+    assert health.status_code == 503
+    assert health.json()["status"] == "degraded"
+    assert degraded_client.post("/predict", json=make_request()).status_code == 503
+
+
+def test_extra_field_returns_422(client):
+    """An unexpected field (e.g. a typo) is rejected with 422, not silently ignored (extra='forbid')."""
+    payload = make_request()
+    payload["surprise"] = 1
+    assert client.post("/predict", json=payload).status_code == 422
+
+
+def test_reload_swaps_model_version(client, monkeypatch):
+    """/admin/reload changes which version the live service serves - the rollback mechanism (T18)."""
+    assert client.get("/health").json()["model_version"] == "test"
+    monkeypatch.setenv("ADMIN_TOKEN", "secret")
+    monkeypatch.setattr(
+        app_module,
+        "load_champion",
+        lambda: {"model": StubModel(), "version": "test2", "zones": STUB_ZONES},
+    )
+    resp = client.post("/admin/reload", headers={"X-Admin-Token": "secret"})
+    assert resp.status_code == 200
+    assert resp.json()["model_version"] == "test2"
+    assert client.get("/health").json()["model_version"] == "test2"
