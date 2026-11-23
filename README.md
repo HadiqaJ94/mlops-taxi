@@ -7,24 +7,25 @@ Data: NYC Taxi & Limousine Commission (TLC) Trip Record Data,
 https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page. Raw files are not committed:
 `src/data/download.py` plus DVC rebuild them.
 
-## Project status (22 November)
+## Project status (23 November)
 
 | Task | What | Owner | State |
 |---|---|---|---|
 | T0-T3 | uv, Git, DVC pipeline, MLflow server | Hadiqa, Soumaya | done |
 | T4 | Data validation (pandera, `validate` stage) | Soumaya | done, PR #8, #10 |
-| T5, T8 | FastAPI service and API tests | Manel, Soumaya | done, PR #4, #5 (3 extra tests still to add) |
+| T5, T8 | FastAPI service and API tests | Manel, Soumaya | done, PR #4, #5 |
 | T6 | Training gate (`src/gate.py`) | Alzira | done, PR #15 |
 | T7 | CI: lint and tests on pull requests | Hadiqa | done, PR #14 |
 | T9 | Dockerfile for the API | Hadiqa | done, PR #12, #13 |
 | T11 | Drift detection (`src/drift.py`) | Soumaya | done, PR #7 |
 | T16, T17 | Drift-triggered retraining, train/retrain workflows | Alzira | done, PR #18 |
 | T18 | Rollback runbook (`docs/runbook.md`) | Manel | done, PR #11 (no canary) |
-| T19 | Incident: simulator done (PR #9); run and report pending | Soumaya | in progress, waits on T13 |
-| T10, T12, T13 | `/metrics`, Prometheus/Grafana stack, alerts | Danila | to do |
-| T14 | Load test (Locust) | Manel | to do |
-| T15 | CI: build and push the Docker image | Hadiqa | to do |
-| T20, T21 | Fresh-clone test, presentation | all | to do |
+| T19 | Incident simulation and report (`reports/incident_report.md`) | Soumaya, Danila, Alzira | done, PR #9, #26 |
+| T10, T12, T13 | `/metrics`, Prometheus/Grafana stack, alerts | Danila | done, PR #21, #22, #23, #25 |
+| T14 | Load test (Locust) | Manel | done, PR #27 |
+| T15 | CI: build, smoke-test and push the Docker image (`docker.yml`) | Hadiqa | done |
+| T20 | Fresh-clone test | all | done, PR #20 |
+| T21 | Presentation and backup video | all | to do |
 
 ## Architecture
 
@@ -226,6 +227,7 @@ protects the champion.
 | `ci.yml` | every pull request and push to `master` | `ruff check`, `pytest` |
 | `train.yml` | manual (input: `min_improvement`) | `dvc repro validate` -> forced `train` stage -> `src.gate` |
 | `retrain.yml` | every Monday 06:00 UTC + manual (inputs: `force`, `as_of`) | same setup, reference model gated to champion, then `src.retrain` (drift check -> retrain -> gate) |
+| `docker.yml` | every pull request and push to `master` + manual | builds the API image, smoke test (container starts, `/docs` answers, `/health` gives 200 or 503 with no model); on `master` pushes it to GHCR as `ghcr.io/hadiqaj94/mlops-taxi:<short commit SHA>` |
 
 Run one: GitHub -> **Actions** -> pick `train` or `retrain` -> **Run workflow** -> fill the inputs.
 The reports are attached to the run as **artifacts** (bottom of the run page): `train-reports`
