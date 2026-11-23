@@ -77,7 +77,7 @@ stages:
       size: 179
     - path: src/features.py
       hash: md5
-      md5: 70ca8eb3c1acada6279535153227c288
+      md5: d72eafbdd5f7015d17068cf8ab9e025b
       size: 2753
     - path: src/registry.py
       hash: md5

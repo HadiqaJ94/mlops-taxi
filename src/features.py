@@ -26,8 +26,8 @@ def calendar_features(timestamps) -> pd.DataFrame:
     return pd.DataFrame(
         {
             "hour": ts.hour,
-            "dayofweek": ts.dayofweek,
-            "is_weekend": (ts.dayofweek >= 5).astype(int),
+            "dayofweek": ts.day_of_week,
+            "is_weekend": (ts.day_of_week >= 5).astype(int),
             "is_holiday": ts.normalize().isin(_HOLIDAYS).astype(int),
         }
     )
