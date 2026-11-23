@@ -130,8 +130,3 @@ promtool test rules monitoring/prometheus/alerts_test.yml       # alert rules (n
 | `retrain.yml` (drift check, retrain, gate) | every Monday 06:00 UTC | Actions -> retrain -> Run workflow |
 
 Reports are attached to each run as artifacts.
-
-## 11. Contributing
-- One branch per task (`git checkout -b feat/<task>`), a pull request, one review, then merge.
-- Add packages with `uv add <pkg>`. Commit `uv.lock` and `dvc.lock` when they change.
-- Never commit `.env`, `data/`, `mlflow-data/`, `mlruns/` or `.venv/`.
